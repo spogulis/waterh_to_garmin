@@ -16,7 +16,7 @@ from datetime import datetime
 
 from flask import Flask, Response, request
 
-from waterh_to_garmin import TZ, garmin_add, garmin_status, run_sync
+from waterh_to_garmin import TZ, garmin_add, garmin_status, run_sync, set_manual_today
 
 SYNC_KEY = os.environ.get("SYNC_KEY", "")
 INTERVAL = int(os.environ.get("SYNC_INTERVAL_SECONDS", "3600"))
@@ -70,7 +70,10 @@ def add():
     if ml == 0 or abs(ml) > 2000:
         return {"error": "ml must be non-zero and within ±2000"}, 400
     try:
-        garmin_add(ml)
+        # Same lock as the sync: both rewrite the state file (the manual
+        # ledger lives there), so their read-modify-write must not interleave.
+        with SYNC_LOCK:
+            garmin_add(ml)
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}, 500
     try:
@@ -79,6 +82,25 @@ def add():
         # The add committed; report that instead of a misleading error and
         # let the widget refresh status itself.
         return {"added_ml": ml}
+
+
+@app.get("/set_manual")
+def set_manual():
+    """Admin fix: set today's manual-intake ledger without touching Garmin."""
+    if not SYNC_KEY or not hmac.compare_digest(request.args.get("key", ""), SYNC_KEY):
+        return Response("forbidden\n", status=403, mimetype="text/plain")
+    try:
+        ml = int(request.args.get("ml", ""))
+    except ValueError:
+        return {"error": "ml must be an integer"}, 400
+    if not 0 <= ml <= 5000:
+        return {"error": "ml must be between 0 and 5000"}, 400
+    try:
+        with SYNC_LOCK:
+            set_manual_today(ml)
+        return garmin_status()
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}, 500
 
 
 @app.get("/sync")

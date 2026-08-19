@@ -140,10 +140,13 @@ def load_state():
 def save_state(state):
     cutoff = (datetime.now(TZ) - timedelta(days=7)).date().isoformat()
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # Keys are either "YYYY-MM-DD" (WaterH baseline) or "manual:YYYY-MM-DD"
+    # (per-day manual-intake ledger) — prune both by their date part.
+    kept = {k: v for k, v in state.items() if k.split(":")[-1] >= cutoff}
     # Atomic replace: a crash mid-write must not leave a corrupt state file
     # (an unreadable file would reset the baselines and risk double-counts).
     tmp = STATE_PATH.with_name(STATE_PATH.name + ".tmp")
-    tmp.write_text(json.dumps({k: v for k, v in state.items() if k >= cutoff}))
+    tmp.write_text(json.dumps(kept))
     os.replace(tmp, STATE_PATH)
 
 
@@ -168,10 +171,23 @@ def sync_day(garmin, cdate, waterh_ml, state):
 
 
 def garmin_add(ml):
-    """Log a manual intake (e.g. a coffee from the widget) for today."""
+    """Log a manual intake (e.g. a coffee from the widget) for today, and
+    record it in the per-day manual ledger (negative ml = undo)."""
     garmin = garmin_connect()
-    today = datetime.now(TZ).date()
-    garmin.add_hydration_data(value_in_ml=float(ml), cdate=today.isoformat())
+    today = datetime.now(TZ).date().isoformat()
+    garmin.add_hydration_data(value_in_ml=float(ml), cdate=today)
+    state = load_state()
+    key = f"manual:{today}"
+    state[key] = max(0.0, state.get(key, 0.0) + ml)
+    save_state(state)
+
+
+def set_manual_today(ml):
+    """Admin fix: overwrite today's manual-intake ledger WITHOUT touching
+    Garmin — for when an addition was logged outside the widget."""
+    state = load_state()
+    state[f"manual:{datetime.now(TZ).date().isoformat()}"] = float(ml)
+    save_state(state)
 
 
 def garmin_status():
@@ -188,6 +204,7 @@ def garmin_status():
     goal_base = float(data.get("goalInML") or 0)
     sweat = float(data.get("sweatLossInML") or 0)
     goal = goal_base + sweat
+    manual = load_state().get(f"manual:{today.isoformat()}", 0.0)
     return {
         "date": today.isoformat(),
         "intake_ml": round(intake),
@@ -195,6 +212,7 @@ def garmin_status():
         "sweat_loss_ml": round(sweat),
         "goal_ml": round(goal),
         "percent": round(100 * intake / goal) if goal > 0 else 0,
+        "manual_today_ml": round(manual),
         "last_entry_local": data.get("lastEntryTimestampLocal"),
     }
 
