@@ -133,6 +133,31 @@ def sync_day(garmin, cdate, waterh_ml):
     return garmin_ml, max(delta, 0)
 
 
+def garmin_status():
+    """Read today's hydration state from Garmin for the phone widget.
+
+    Garmin's auto-increasing daily goal is base goal + estimated sweat loss
+    from activities; the API keeps goalInML at the base value and reports
+    sweat loss separately, so the effective goal is computed here.
+    """
+    garmin = garmin_connect()
+    today = datetime.now(TZ).date()
+    data = garmin.get_hydration_data(today.isoformat()) or {}
+    intake = float(data.get("valueInML") or 0)
+    goal_base = float(data.get("goalInML") or 0)
+    sweat = float(data.get("sweatLossInML") or 0)
+    goal = goal_base + sweat
+    return {
+        "date": today.isoformat(),
+        "intake_ml": round(intake),
+        "goal_base_ml": round(goal_base),
+        "sweat_loss_ml": round(sweat),
+        "goal_ml": round(goal),
+        "percent": round(100 * intake / goal) if goal > 0 else 0,
+        "last_entry_local": data.get("lastEntryTimestampLocal"),
+    }
+
+
 def run_sync(dry_run=False):
     """Do the sync and return a list of human-readable result lines."""
     cfg = load_config()

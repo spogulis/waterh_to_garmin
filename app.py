@@ -16,7 +16,7 @@ from datetime import datetime
 
 from flask import Flask, Response, request
 
-from waterh_to_garmin import TZ, run_sync
+from waterh_to_garmin import TZ, garmin_status, run_sync
 
 SYNC_KEY = os.environ.get("SYNC_KEY", "")
 INTERVAL = int(os.environ.get("SYNC_INTERVAL_SECONDS", "3600"))
@@ -39,11 +39,24 @@ def health():
     return Response("ok\n", mimetype="text/plain")
 
 
+@app.get("/status")
+def status():
+    """Today's Garmin hydration state as JSON (for the Android widget)."""
+    if not SYNC_KEY or not hmac.compare_digest(request.args.get("key", ""), SYNC_KEY):
+        return Response("forbidden\n", status=403, mimetype="text/plain")
+    try:
+        return garmin_status()
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}, 500
+
+
 @app.get("/sync")
 def sync():
     if not SYNC_KEY or not hmac.compare_digest(request.args.get("key", ""), SYNC_KEY):
         return Response("forbidden\n", status=403, mimetype="text/plain")
     ok, msg = do_sync()
+    if request.args.get("format") == "json":
+        return {"ok": ok, "result": msg.splitlines()}, (200 if ok else 500)
     title = "✅ Synced" if ok else "❌ Sync failed"
     html = f"""<!doctype html>
 <html><head><meta charset="utf-8">

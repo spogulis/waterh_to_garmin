@@ -182,6 +182,26 @@ result. To make it a one-tap button:
 
 ---
 
+## Widget API
+
+For the companion Android home-screen widget (or anything else that wants
+machine-readable state), the service also exposes:
+
+- `GET /status?key=SYNC_KEY` → today's Garmin hydration state as JSON:
+  ```json
+  {"date": "2026-08-19", "intake_ml": 1250, "goal_base_ml": 2400,
+   "sweat_loss_ml": 550, "goal_ml": 2950, "percent": 42,
+   "last_entry_local": "2026-08-19T13:40:00.0"}
+  ```
+  `goal_ml` is the **dynamic** goal: Garmin's base goal plus the estimated
+  sweat loss from your activities (Garmin's auto-increase keeps `goalInML` at
+  the base value and reports sweat loss separately, so the effective goal is
+  computed here).
+- `GET /sync?key=SYNC_KEY&format=json` → runs a sync and returns
+  `{"ok": true, "result": ["…per-day lines…"]}` instead of the HTML page.
+
+---
+
 ## Scheduling
 
 The Docker service syncs every `SYNC_INTERVAL_SECONDS` (default hourly) via a
