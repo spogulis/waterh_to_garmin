@@ -1,0 +1,21 @@
+# Secrets — never commit these
+.env
+waterh-garmin.env
+browser_tokens.json
+garmin_tokens.json
+.garminconnect/
+data/
+
+# Traffic captures from reverse-engineering
+*.pcap
+*.pcapng
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Runtime logs
+sync.log
+sync.err

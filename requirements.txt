@@ -1,0 +1,6 @@
+requests
+garminconnect>=0.3.0
+curl_cffi
+typing_extensions
+tzdata
+flask

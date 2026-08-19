@@ -1,0 +1,16 @@
+services:
+  waterh-garmin:
+    build: .
+    container_name: waterh-garmin
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      GARMIN_TOKENSTORE: /data
+    volumes:
+      # Holds garmin_tokens.json (the refreshable session). Put your
+      # bootstrapped token here as ./data/garmin_tokens.json before first run.
+      - ./data:/data
+    ports:
+      # host:container — the manual /sync endpoint. Restrict/limit exposure
+      # (LAN, VPN, or an HTTPS reverse proxy) rather than opening to the internet.
+      - "8000:8000"
