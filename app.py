@@ -65,8 +65,10 @@ def add():
         ml = int(request.args.get("ml", ""))
     except ValueError:
         return {"error": "ml must be an integer"}, 400
-    if not 1 <= ml <= 2000:
-        return {"error": "ml must be between 1 and 2000"}, 400
+    # Negative amounts undo an earlier manual addition (Garmin accepts
+    # negative deltas and floors the day at 0).
+    if ml == 0 or abs(ml) > 2000:
+        return {"error": "ml must be non-zero and within ±2000"}, 400
     try:
         garmin_add(ml)
     except Exception as e:
