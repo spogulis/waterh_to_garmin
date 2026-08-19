@@ -5,9 +5,10 @@ Config is read from environment variables, falling back to a local
 `waterh-garmin.env` file (KEY=VALUE lines) next to this script. See
 `.env.example` for the keys.
 
-Safe to run repeatedly: it tops Garmin up to match WaterH's daily total
-(reads Garmin's current value and adds only the difference), so re-runs
-never double-count.
+Safe to run repeatedly: it remembers how much WaterH data it has already
+pushed per day (sync_state.json) and only ever adds the WaterH increase,
+so re-runs never double-count and manual Garmin entries (e.g. the widget's
+coffee buttons) are left untouched.
 """
 import base64
 import json
@@ -123,14 +124,54 @@ def garmin_connect():
     return g
 
 
-def sync_day(garmin, cdate, waterh_ml):
+# Tracks how much WaterH data this tool has already pushed per day, so manual
+# Garmin entries (e.g. the widget's coffee buttons) aren't absorbed by the
+# reconciliation. Lives next to the Garmin token so Docker persists it.
+STATE_PATH = GARMIN_TOKENSTORE / "sync_state.json"
+
+
+def load_state():
+    try:
+        return {k: float(v) for k, v in json.loads(STATE_PATH.read_text()).items()}
+    except Exception:
+        return {}
+
+
+def save_state(state):
+    cutoff = (datetime.now(TZ) - timedelta(days=7)).date().isoformat()
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # Atomic replace: a crash mid-write must not leave a corrupt state file
+    # (an unreadable file would reset the baselines and risk double-counts).
+    tmp = STATE_PATH.with_name(STATE_PATH.name + ".tmp")
+    tmp.write_text(json.dumps({k: v for k, v in state.items() if k >= cutoff}))
+    os.replace(tmp, STATE_PATH)
+
+
+def sync_day(garmin, cdate, waterh_ml, state):
+    """Push only the WaterH *increase* since the last run, so additions made
+    directly in Garmin (coffee, manual edits) are left untouched."""
     cdate_str = cdate.isoformat()
     current = garmin.get_hydration_data(cdate_str) or {}
     garmin_ml = current.get("valueInML") or 0
-    delta = waterh_ml - garmin_ml
+    last = state.get(cdate_str)
+    if last is None:
+        # No state for this day (first run, or state file lost). Assume
+        # Garmin's current value came from earlier syncs of bottle water,
+        # but never assume more than WaterH itself reports — this prevents
+        # double-counting at the cost of possibly under-crediting once.
+        last = min(garmin_ml, waterh_ml)
+    delta = waterh_ml - last
     if delta >= 1:
         garmin.add_hydration_data(value_in_ml=float(delta), cdate=cdate_str)
+    state[cdate_str] = max(waterh_ml, last)
     return garmin_ml, max(delta, 0)
+
+
+def garmin_add(ml):
+    """Log a manual intake (e.g. a coffee from the widget) for today."""
+    garmin = garmin_connect()
+    today = datetime.now(TZ).date()
+    garmin.add_hydration_data(value_in_ml=float(ml), cdate=today.isoformat())
 
 
 def garmin_status():
@@ -172,14 +213,27 @@ def run_sync(dry_run=False):
         return out
 
     garmin = garmin_connect()
+    state = load_state()
     today = datetime.now(TZ).date()
+    if state:
+        # Day continuity exists: pin today's baseline early so coffee/manual
+        # Garmin additions made before the first bottle data of a new day
+        # can't be mistaken for already-synced bottle water. With no state at
+        # all (first deployment, lost file) sync_day's conservative min()
+        # fallback applies instead — pinning 0 there would re-push amounts
+        # Garmin already holds.
+        state.setdefault(today.isoformat(), 0)
     for cdate in (today, today - timedelta(days=1)):   # today + reconcile yesterday
         ml = daily.get(cdate, 0)
         if ml <= 0:
             out.append(f"{cdate}: no WaterH data")
             continue
-        before, added = sync_day(garmin, cdate, ml)
+        before, added = sync_day(garmin, cdate, ml, state)
+        # Persist immediately after each day's Garmin write: if the other
+        # day's pass fails, the delivered delta must not be re-pushed later.
+        save_state(state)
         out.append(f"{cdate}: WaterH={ml:.0f}ml  Garmin_before={before:.0f}ml  added={added:.0f}ml")
+    save_state(state)
     return out
 
 

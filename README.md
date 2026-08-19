@@ -199,6 +199,13 @@ machine-readable state), the service also exposes:
   computed here).
 - `GET /sync?key=SYNC_KEY&format=json` → runs a sync and returns
   `{"ok": true, "result": ["…per-day lines…"]}` instead of the HTML page.
+- `GET /add?key=SYNC_KEY&ml=200` → logs a manual intake for today (the
+  widget's coffee buttons) straight into Garmin and returns fresh status JSON.
+
+Manual additions coexist with the bottle sync: the tool remembers how much
+WaterH data it has already pushed per day (`sync_state.json`, stored next to
+the Garmin token) and only ever adds the WaterH *increase*, so it never
+swallows amounts you logged directly in Garmin.
 
 ---
 

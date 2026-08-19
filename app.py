@@ -16,7 +16,7 @@ from datetime import datetime
 
 from flask import Flask, Response, request
 
-from waterh_to_garmin import TZ, garmin_status, run_sync
+from waterh_to_garmin import TZ, garmin_add, garmin_status, run_sync
 
 SYNC_KEY = os.environ.get("SYNC_KEY", "")
 INTERVAL = int(os.environ.get("SYNC_INTERVAL_SECONDS", "3600"))
@@ -25,10 +25,16 @@ RUN_SCHEDULER = os.environ.get("RUN_SCHEDULER", "1") == "1"
 
 app = Flask(__name__)
 
+# The scheduler thread and the /sync route must not run concurrently: two
+# interleaved syncs would read the same state baseline and push the delta
+# twice (and race on the state file).
+SYNC_LOCK = threading.Lock()
+
 
 def do_sync():
     try:
-        lines = run_sync()
+        with SYNC_LOCK:
+            lines = run_sync()
         return True, "\n".join(lines) if lines else "no data"
     except Exception as e:
         return False, f"{type(e).__name__}: {e}\n\n{traceback.format_exc()}"
@@ -48,6 +54,29 @@ def status():
         return garmin_status()
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}, 500
+
+
+@app.get("/add")
+def add():
+    """Log a manual intake (widget coffee buttons) and return fresh status."""
+    if not SYNC_KEY or not hmac.compare_digest(request.args.get("key", ""), SYNC_KEY):
+        return Response("forbidden\n", status=403, mimetype="text/plain")
+    try:
+        ml = int(request.args.get("ml", ""))
+    except ValueError:
+        return {"error": "ml must be an integer"}, 400
+    if not 1 <= ml <= 2000:
+        return {"error": "ml must be between 1 and 2000"}, 400
+    try:
+        garmin_add(ml)
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}, 500
+    try:
+        return garmin_status()
+    except Exception:
+        # The add committed; report that instead of a misleading error and
+        # let the widget refresh status itself.
+        return {"added_ml": ml}
 
 
 @app.get("/sync")
