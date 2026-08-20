@@ -16,7 +16,8 @@ from datetime import datetime
 
 from flask import Flask, Response, request
 
-from waterh_to_garmin import TZ, garmin_add, garmin_status, run_sync, set_manual_today
+from waterh_to_garmin import (TZ, garmin_add, garmin_status, load_state,
+                              run_sync, set_manual_today)
 
 SYNC_KEY = os.environ.get("SYNC_KEY", "")
 INTERVAL = int(os.environ.get("SYNC_INTERVAL_SECONDS", "3600"))
@@ -82,6 +83,25 @@ def add():
         # The add committed; report that instead of a misleading error and
         # let the widget refresh status itself.
         return {"added_ml": ml}
+
+
+@app.get("/last_manual")
+def last_manual():
+    """When was the latest manual add (= widget coffee) today? Local state
+    read only - no Garmin call. Used by the nap advisor on this host."""
+    if not SYNC_KEY or not hmac.compare_digest(request.args.get("key", ""), SYNC_KEY):
+        return Response("forbidden\n", status=403, mimetype="text/plain")
+    now = datetime.now(TZ)
+    today = now.date().isoformat()
+    state = load_state()
+    ts = state.get(f"manual_last:{today}")
+    return {
+        "date": today,
+        "manual_ml_today": state.get(f"manual:{today}", 0.0),
+        "last_ts": ts,
+        "last_hhmm": datetime.fromtimestamp(ts, TZ).strftime("%H:%M") if ts else None,
+        "minutes_ago": round((now.timestamp() - ts) / 60) if ts else None,
+    }
 
 
 @app.get("/set_manual")

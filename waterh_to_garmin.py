@@ -174,11 +174,16 @@ def garmin_add(ml):
     """Log a manual intake (e.g. a coffee from the widget) for today, and
     record it in the per-day manual ledger (negative ml = undo)."""
     garmin = garmin_connect()
-    today = datetime.now(TZ).date().isoformat()
+    now = datetime.now(TZ)
+    today = now.date().isoformat()
     garmin.add_hydration_data(value_in_ml=float(ml), cdate=today)
     state = load_state()
     key = f"manual:{today}"
     state[key] = max(0.0, state.get(key, 0.0) + ml)
+    if ml > 0:
+        # Timestamp of the latest manual add (widget coffee): consumers like
+        # the nap advisor read this via /last_manual. Same float-only schema.
+        state[f"manual_last:{today}"] = now.timestamp()
     save_state(state)
 
 
