@@ -198,17 +198,18 @@ def set_manual_today(ml):
 def garmin_status():
     """Read today's hydration state from Garmin for the phone widget.
 
-    Garmin's auto-increasing daily goal is base goal + estimated sweat loss
-    from activities; the API keeps goalInML at the base value and reports
-    sweat loss separately, so the effective goal is computed here.
+    Garmin's goalInML already reflects the goal shown in the Garmin app —
+    including the automatic sweat-loss increase after activities — so it is
+    used as-is. sweatLossInML is returned for display only; adding it on top
+    of goalInML would double-count the sweat bump.
     """
     garmin = garmin_connect()
     today = datetime.now(TZ).date()
     data = garmin.get_hydration_data(today.isoformat()) or {}
     intake = float(data.get("valueInML") or 0)
-    goal_base = float(data.get("goalInML") or 0)
+    goal = float(data.get("goalInML") or 0)
     sweat = float(data.get("sweatLossInML") or 0)
-    goal = goal_base + sweat
+    goal_base = max(goal - sweat, 0.0)
     manual = load_state().get(f"manual:{today.isoformat()}", 0.0)
     return {
         "date": today.isoformat(),
